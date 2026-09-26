@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Chanter — an expressive singing-monk vocal synthesizer." />
+    <meta name="theme-color" content="#141b31" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <title>Chanter · Vocal Synthesizer</title>
+    <!-- Paint the page dark immediately, even before the stylesheet arrives. -->
+    <style>
+      html,
+      body {
+        background: #10162b;
+        color: #eadfc6;
+      }
+    </style>
+    <link rel="stylesheet" href="/src/styles.css" />
+  </head>
+  <body>
+    <div class="app" id="app">
+      <aside class="panel panel-left" aria-label="Backing tracks and transport">
+        <header class="brand">
+          <svg class="brand-mark" viewBox="0 0 48 48" aria-hidden="true">
+            <circle cx="24" cy="24" r="21" fill="none" stroke="currentColor" stroke-width="2" />
+            <path d="M16 26q8 9 16 0" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" />
+            <path d="M9 17a17 17 0 0 1 5-6M39 17a17 17 0 0 0-5-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+          </svg>
+          <h1 class="logo">Chanter</h1>
+          <p class="tagline">Vocal Synthesizer</p>
+        </header>
+
+        <section class="block tracks" aria-labelledby="tracks-h">
+          <h2 id="tracks-h" class="eyebrow">Backing tracks</h2>
+          <ul class="track-list" id="track-list"></ul>
+        </section>
+
+        <section class="block transport" aria-label="Transport and melody loop">
+          <div class="row">
+            <label class="eyebrow" for="tempo">Tempo</label>
+            <div class="beat-dots" id="beat-dots" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+            <output class="readout" id="tempo-out" for="tempo">84 <small>BPM</small></output>
+          </div>
+          <input type="range" id="tempo" min="60" max="160" step="1" value="84" />
+          <div class="transport-buttons">
+            <button class="tbtn" id="btn-play" type="button" aria-label="Play backing track" title="Play / pause (Space)">
+              <svg viewBox="0 0 24 24" class="i-play" aria-hidden="true"><path d="M7 4.5v15l12.5-7.5z" /></svg>
+              <svg viewBox="0 0 24 24" class="i-pause" aria-hidden="true"><path d="M6.5 4.5h4v15h-4zM13.5 4.5h4v15h-4z" /></svg>
+            </button>
+            <button class="tbtn tbtn-rec" id="btn-rec" type="button" aria-label="Record melody loop" title="Record a melody loop (R)">
+              <span class="rec-dot" aria-hidden="true"></span>
+            </button>
+            <button class="tbtn" id="btn-stop" type="button" aria-label="Stop" title="Stop (Esc)">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="1" /></svg>
+            </button>
+          </div>
+          <div class="loop" role="group" aria-labelledby="loop-h">
+            <div class="row">
+              <h2 id="loop-h" class="eyebrow">Loop</h2>
+              <select id="loop-bars" aria-label="Loop length">
+                <option value="2">2 bars</option>
+                <option value="4" selected>4 bars</option>
+                <option value="8">8 bars</option>
+              </select>
+              <button type="button" class="chip" id="btn-loop-toggle" aria-pressed="true" disabled>Replay on</button>
+              <details class="loop-menu" id="loop-menu">
+                <summary class="chip" aria-label="Loop options" title="Save, load, export or clear the loop">⋯</summary>
+                <div class="menu-pop">
+                  <button type="button" id="btn-loop-save" disabled>Save melody (.json)</button>
+                  <button type="button" id="btn-loop-load">Load melody…</button>
+                  <button type="button" id="btn-loop-export" disabled>Export audio (one loop)</button>
+                  <button type="button" id="btn-loop-clear" disabled>Clear loop</button>
+                </div>
+              </details>
+              <input type="file" id="loop-file" accept="application/json,.json" hidden />
+            </div>
+            <div class="loop-progress" aria-hidden="true"><div id="loop-bar"></div></div>
+            <p class="loop-status" id="loop-status" aria-live="polite">Press ● to record a melody over the track.</p>
+          </div>
+          <div class="row mix-row">
+            <label class="eyebrow" for="track-vol">Backing</label>
+            <input type="range" id="track-vol" min="0" max="1" step="0.01" value="0.7" />
+            <label class="check" title="One-bar count-in before the track starts"><input type="checkbox" id="countin" checked /> <span>Count-in</span></label>
+          </div>
+        </section>
+      </aside>
+
+      <main class="stage" id="stage">
+        <div class="stage-art" id="stage-art"></div>
+        <div class="countin" id="countin-display" aria-live="assertive"></div>
+        <div class="now" aria-live="off">
+          <span class="now-note" id="now-note">—</span>
+          <span class="now-detail" id="now-detail">silent</span>
+        </div>
+        <button class="wake" id="wake" type="button">
+          <span class="wake-title">Wake the voice</span>
+          <span class="wake-sub">Click here, or just play a key — <kbd>A</kbd> to <kbd>K</kbd></span>
+        </button>
+      </main>
+
+      <section class="panel panel-right" aria-label="Voice controls">
+        <div class="topbar">
+          <label class="vol">
+            <span class="eyebrow">Volume</span>
+            <input type="range" id="volume" min="0" max="1" step="0.01" value="0.8" aria-label="Master volume" />
+          </label>
+          <button type="button" class="icon-btn" id="btn-motion" aria-pressed="false" title="Reduce motion">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h4l2-5 4 10 2-5h6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" /></svg>
+            <span class="sr-only">Reduce motion</span>
+          </button>
+          <button type="button" class="icon-btn" id="btn-help" title="Help and shortcuts (?)">
+            <span aria-hidden="true">?</span><span class="sr-only">Help and shortcuts</span>
+          </button>
+        </div>
+
+        <div class="pad-frame">
+          <div class="pad-axis-y" aria-hidden="true">
+            <span class="axis-title">Vowel</span>
+            <ol class="vowel-ticks"><li>EE</li><li>EH</li><li>AH</li><li>OH</li><li>OO</li></ol>
+          </div>
+          <div class="pad-slot" id="pad-slot"></div>
+          <div class="pad-axis-x" aria-hidden="true"><span>Low</span><span class="axis-title">Pitch</span><span>High</span></div>
+        </div>
+
+        <div class="snap" role="radiogroup" aria-label="Pad pitch snapping">
+          <span class="eyebrow">Pad pitch</span>
+          <label><input type="radio" name="snap" value="free" /> <span>Free</span></label>
+          <label><input type="radio" name="snap" value="semitone" /> <span>Semitone</span></label>
+          <label><input type="radio" name="snap" value="scale" checked /> <span>White keys</span></label>
+        </div>
+
+        <div class="sound-controls" id="sound-controls">
+          <div class="echo">
+            <div class="ctl-label" id="echo-label">Echo Mix</div>
+            <input type="range" id="echo" min="0" max="1" step="0.01" value="0.3" aria-labelledby="echo-label" />
+            <div class="echo-scale" aria-hidden="true"><span>Dry</span><span id="echo-out">30%</span><span>Wet</span></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="keys-area" aria-label="Keyboard">
+        <div class="vowel-strip">
+          <label class="ctl-label" for="vowel">Vowel</label>
+          <div class="vowel-body">
+            <input type="range" id="vowel" min="0" max="1" step="0.01" value="0.5" aria-valuetext="AH" />
+            <ol class="vowel-marks" aria-hidden="true">
+              <li><b>EE</b><kbd>5</kbd></li>
+              <li><b>EH</b><kbd>4</kbd></li>
+              <li><b>AH</b><kbd>3</kbd></li>
+              <li><b>OH</b><kbd>2</kbd></li>
+              <li><b>OO</b><kbd>1</kbd></li>
+            </ol>
+          </div>
+        </div>
+        <div class="keys-main">
+          <div class="keys-head">
+            <div class="octave" role="group" aria-label="Octave">
+              <button type="button" class="chip" id="oct-down" title="Octave down (Z)"><kbd>Z</kbd> Oct −</button>
+              <output id="oct-out">C3</output>
+              <button type="button" class="chip" id="oct-up" title="Octave up (X)">Oct + <kbd>X</kbd></button>
+            </div>
+            <p class="hints">
+              <span><kbd>A</kbd>–<kbd>'</kbd> play</span>
+              <span><kbd>1</kbd>–<kbd>5</kbd> vowel</span>
+              <span><kbd>↑</kbd><kbd>↓</kbd> sweep vowel</span>
+              <span><kbd>Space</kbd> play/pause</span>
+              <span><kbd>R</kbd> record</span>
+              <span><kbd>Esc</kbd> stop</span>
+            </p>
+          </div>
+          <div id="piano-slot" class="piano-slot"></div>
+        </div>
+      </section>
+    </div>
+
+    <dialog class="help" id="help" aria-labelledby="help-h">
+      <h2 id="help-h">How to play</h2>
+      <div class="help-cols">
+        <div>
+          <h3>Sing</h3>
+          <ul>
+            <li>Hold a piano key, or a computer key <kbd>A</kbd> <kbd>W</kbd> <kbd>S</kbd> … <kbd>'</kbd>.</li>
+            <li>Press &amp; drag the <b>pad</b>: left–right is pitch, up–down is vowel.</li>
+            <li>While a key is held, the pad (or <kbd>↑</kbd> <kbd>↓</kbd>, <kbd>1</kbd>–<kbd>5</kbd>, or dragging up/down on the key) changes only the vowel.</li>
+            <li><kbd>Z</kbd> / <kbd>X</kbd> shift the keyboard an octave.</li>
+          </ul>
+        </div>
+        <div>
+          <h3>Shape</h3>
+          <ul>
+            <li><b>Glide</b>: how slowly the voice slides between notes.</li>
+            <li><b>Echo Mix</b>: dry voice ↔ tempo-synced echo.</li>
+            <li><b>Voice</b>: baritone → soprano vocal character.</li>
+          </ul>
+          <h3>Loop</h3>
+          <ul>
+            <li><kbd>Space</kbd> plays the selected track after a one-bar count-in.</li>
+            <li><kbd>R</kbd> records a 2/4/8-bar melody loop in time with the track; it replays every cycle. Playing live takes over from the replay.</li>
+          </ul>
+        </div>
+      </div>
+      <form method="dialog"><button class="chip" autofocus>Close</button></form>
+    </dialog>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

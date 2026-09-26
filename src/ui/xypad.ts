@@ -17,6 +17,8 @@ const NS = 'http://www.w3.org/2000/svg';
 export class XYPad {
   readonly el: HTMLElement;
   snap: SnapMode = 'scale';
+  /** Pointer and keyboard input; off while the camera steers the voice. */
+  private inputOn = true;
   private lo = 36;
   private hi = 72;
   private readonly svg: SVGSVGElement;
@@ -95,6 +97,39 @@ export class XYPad {
     }
   }
 
+  get lowNote(): number {
+    return this.lo;
+  }
+
+  get highNote(): number {
+    return this.hi;
+  }
+
+  get input(): boolean {
+    return this.inputOn;
+  }
+
+  set input(on: boolean) {
+    if (on === this.inputOn) return;
+    this.inputOn = on;
+    this.el.tabIndex = on ? 0 : -1;
+    this.el.classList.toggle('is-passive', !on);
+    if (!on && (this.pointerId !== null || this.kbHeld)) {
+      const id = this.pointerId;
+      this.pointerId = null;
+      if (id !== null && this.el.hasPointerCapture(id)) this.el.releasePointerCapture(id);
+      this.kbHeld = false;
+      this.el.classList.remove('is-active');
+      this.o.onEnd();
+    }
+  }
+
+  /** Snapped note at horizontal position `x` (0 = left … 1 = right). */
+  midiAt(x: number): number {
+    const m = this.quantize(this.lo + Math.min(1, Math.max(0, x)) * (this.hi - this.lo));
+    return Math.min(this.hi, Math.max(this.lo, m));
+  }
+
   private xOf(midi: number): number {
     return ((midi - this.lo) / (this.hi - this.lo)) * 100;
   }
@@ -107,15 +142,13 @@ export class XYPad {
 
   private fromEvent(e: PointerEvent): [number, number] {
     const r = this.el.getBoundingClientRect();
-    const x = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
     const y = Math.min(1, Math.max(0, (e.clientY - r.top) / r.height));
-    const midi = this.quantize(this.lo + x * (this.hi - this.lo));
-    return [Math.min(this.hi, Math.max(this.lo, midi)), 1 - y];
+    return [this.midiAt((e.clientX - r.left) / r.width), 1 - y];
   }
 
   private bind(): void {
     this.el.addEventListener('pointerdown', (e) => {
-      if (this.pointerId !== null) return;
+      if (this.pointerId !== null || !this.inputOn) return;
       this.pointerId = e.pointerId;
       this.el.setPointerCapture(e.pointerId);
       this.el.classList.add('is-active');
@@ -140,6 +173,7 @@ export class XYPad {
 
     // Keyboard operation of the pad itself.
     this.el.addEventListener('keydown', (e) => {
+      if (!this.inputOn) return;
       const step = this.snap === 'free' ? 0.5 : 1;
       let handled = true;
       switch (e.key) {

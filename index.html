@@ -100,6 +100,10 @@
 
       <section class="panel panel-right" aria-label="Voice controls">
         <div class="topbar">
+          <div class="seg input-mode" role="radiogroup" aria-label="Play the voice with">
+            <label title="Play with the XY pad"><input type="radio" name="input-mode" value="pad" checked /> <span>Pad</span></label>
+            <label title="Play with your face: head position is pitch, mouth shape is the vowel"><input type="radio" name="input-mode" value="camera" /> <span>Camera</span></label>
+          </div>
           <label class="vol">
             <span class="eyebrow">Volume</span>
             <input type="range" id="volume" min="0" max="1" step="0.01" value="0.8" aria-label="Master volume" />
@@ -115,11 +119,11 @@
 
         <div class="pad-frame">
           <div class="pad-axis-y" aria-hidden="true">
-            <span class="axis-title">Vowel</span>
+            <span class="axis-title" id="axis-y-title">Vowel</span>
             <ol class="vowel-ticks"><li>EE</li><li>EH</li><li>AH</li><li>OH</li><li>OO</li></ol>
           </div>
           <div class="pad-slot" id="pad-slot"></div>
-          <div class="pad-axis-x" aria-hidden="true"><span>Low</span><span class="axis-title">Pitch</span><span>High</span></div>
+          <div class="pad-axis-x" aria-hidden="true"><span>Low</span><span class="axis-title" id="axis-x-title">Pitch</span><span>High</span></div>
         </div>
 
         <div class="snap" role="radiogroup" aria-label="Pad pitch snapping">
@@ -127,6 +131,13 @@
           <label><input type="radio" name="snap" value="free" /> <span>Free</span></label>
           <label><input type="radio" name="snap" value="semitone" /> <span>Semitone</span></label>
           <label><input type="radio" name="snap" value="scale" checked /> <span>White keys</span></label>
+        </div>
+
+        <div class="cam-opts" id="cam-opts" hidden>
+          <label class="check" title="Opening your mouth sings the note under your head. Off: the camera only shapes the vowel of notes you play on the keys">
+            <input type="checkbox" id="mouth-sings" checked /> <span>Open mouth to sing</span>
+          </label>
+          <button type="button" class="chip" id="btn-calibrate" title="Teach the camera your mouth shapes for each vowel">Calibrate mouth</button>
         </div>
 
         <div class="sound-controls" id="sound-controls">
@@ -183,6 +194,7 @@
             <li>Press &amp; drag the <b>pad</b>: left–right is pitch, up–down is vowel.</li>
             <li>While a key is held, the pad (or <kbd>↑</kbd> <kbd>↓</kbd>, <kbd>1</kbd>–<kbd>5</kbd>, or dragging up/down on the key) changes only the vowel.</li>
             <li><kbd>Z</kbd> / <kbd>X</kbd> shift the keyboard an octave.</li>
+            <li><b>Camera</b> (switch above the pad): open your mouth to sing, move your head left–right for pitch, and shape OO … EE with your lips. <i>Calibrate mouth</i> teaches it your shapes. The video never leaves your computer.</li>
           </ul>
         </div>
         <div>

@@ -646,6 +646,93 @@ await touch('touchEnd');
 check('touch on a piano key sings C4', Math.abs(tk.f0 - 261.6) < 5 && tk.env > 0.5, `f0=${fmt(tk.f0, 1)}`);
 await tctx.close();
 
+// ---------------------------------------------------------------- camera input
+// A fake webcam shows screenshots of the monk's own face (closed, then singing
+// AH, then nothing). The face tracker is downloaded on first use, so this
+// needs a network connection.
+{
+  const faceClip = async (p) => {
+    const box = await p.locator('.monk').boundingBox();
+    const s = Math.min(box.width / 800, box.height / 700);
+    const ox = box.x + (box.width - 800 * s) / 2;
+    const oy = box.y + (box.height - 700 * s);
+    return { x: ox + 230 * s, y: oy + 40 * s, width: 340 * s, height: 360 * s };
+  };
+  const faces = {};
+  const fp = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  await fp.goto(url);
+  await fp.waitForFunction(() => !!window.__chanter);
+  await fp.keyboard.press('Digit3');
+  await sleep(900);
+  faces.closed = (await fp.screenshot({ clip: await faceClip(fp) })).toString('base64');
+  await fp.keyboard.down('KeyH');
+  await sleep(900);
+  faces.open = (await fp.screenshot({ clip: await faceClip(fp) })).toString('base64');
+  await fp.keyboard.up('KeyH');
+  await fp.close();
+
+  const cctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  await cctx.addInitScript((faces) => {
+    const imgs = {};
+    for (const [k, b64] of Object.entries(faces)) (imgs[k] = new Image()).src = `data:image/png;base64,${b64}`;
+    const c = Object.assign(document.createElement('canvas'), { width: 640, height: 480 });
+    const g = c.getContext('2d');
+    window.__fakeFace = 'closed';
+    setInterval(() => {
+      g.fillStyle = '#1b2440';
+      g.fillRect(0, 0, 640, 480);
+      const im = imgs[window.__fakeFace];
+      if (im?.complete) g.drawImage(im, 320 - im.width / 2, 250 - im.height / 2);
+    }, 33);
+    navigator.mediaDevices.getUserMedia = async () => c.captureStream(30);
+  }, faces);
+  const cp = await cctx.newPage();
+  const cerrors = [];
+  cp.on('pageerror', (e) => cerrors.push(e.message));
+  await cp.goto(url);
+  await cp.waitForFunction(() => !!window.__chanter);
+  await cp.keyboard.press('Digit3'); // wake audio
+  await cp.click('input[name=input-mode][value=camera]');
+  const camOn = await cp
+    .waitForFunction(() => window.__chanter.camera.tracker.active, null, { timeout: 30000 })
+    .then(() => true)
+    .catch(() => false);
+  const ui = await cp.evaluate(() => ({ padInput: window.__chanter.pad.input, opts: !document.getElementById('cam-opts').hidden }));
+  check('camera mode starts the tracker and hands the pad over', camOn && !ui.padInput && ui.opts, JSON.stringify({ camOn, ...ui, msg: await cp.textContent('.cam-msg p') }));
+  const camState = () => cp.evaluate(() => ({ present: window.__chanter.camera.follower.reading.present, gate: window.__chanter.controller.gate, midi: window.__chanter.controller.midi }));
+  const facePresent = await cp.waitForFunction(() => window.__chanter.camera.follower.reading.present, null, { timeout: 8000 }).then(() => true).catch(() => false);
+  await sleep(400);
+  const closedSt = await camState();
+  check('camera finds the face; a closed mouth stays silent', facePresent && closedSt.gate === 0, JSON.stringify(closedSt));
+  await cp.evaluate(() => (window.__fakeFace = 'open'));
+  const sang = await cp.waitForFunction(() => window.__chanter.controller.gate === 1 && (window.__chanter.engine?.heardState().env ?? 0) > 0.4, null, { timeout: 4000 }).then(() => true).catch(() => false);
+  const openSt = await camState();
+  const range = await cp.evaluate(() => [window.__chanter.pad.lowNote, window.__chanter.pad.highNote]);
+  check('opening the mouth sings the note under the head', sang && openSt.midi >= range[0] && openSt.midi <= range[1], JSON.stringify(openSt));
+  await cp.click('#mouth-sings');
+  await sleep(300);
+  const quiet = await camState();
+  await cp.keyboard.down('KeyH');
+  await sleep(400);
+  const keyed = await camState();
+  await cp.keyboard.up('KeyH');
+  await cp.click('#mouth-sings');
+  await cp.waitForFunction(() => window.__chanter.controller.gate === 1, null, { timeout: 2000 }).catch(() => {});
+  check('"Open mouth to sing" off: the mouth only shapes notes played on the keys', quiet.gate === 0 && keyed.gate === 1 && keyed.midi === 57, JSON.stringify({ quiet, keyed }));
+  await cp.evaluate(() => (window.__fakeFace = 'none'));
+  const released = await cp
+    .waitForFunction(() => window.__chanter.controller.gate === 0 && /Looking for your face/.test(document.querySelector('.cam-msg p').textContent), null, { timeout: 2000 })
+    .then(() => true)
+    .catch(() => false);
+  check('losing the face releases the note and asks for it', released);
+  await cp.click('input[name=input-mode][value=pad]');
+  const back = await cp.evaluate(() => ({ active: window.__chanter.camera.tracker.active, padInput: window.__chanter.pad.input }));
+  check('switching back to the pad stops the camera', !back.active && back.padInput, JSON.stringify(back));
+  if (shots) await cp.screenshot({ path: `${shots}/v-camera.png` });
+  check('no page errors in camera mode', cerrors.length === 0, cerrors.slice(0, 2).join(' | '));
+  await cctx.close();
+}
+
 // ---------------------------------------------------------------- layouts
 for (const [w, h] of [
   [1280, 720],

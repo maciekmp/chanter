@@ -6,7 +6,7 @@ const REPLAYED: VoiceParamName[] = ['frequency', 'gate', 'vowel', 'glide', 'voic
 const DEFAULT_VELOCITY = 0.85;
 
 /**
- * Turns live input (keys, XY pad, controls) into mono-synth parameter
+ * Turns live input (keys, XY pad or camera, controls) into mono-synth parameter
  * changes. Keys use last-note priority with legato fall-back; while any key
  * is held, the XY pad only steers the vowel.
  */
@@ -72,17 +72,19 @@ export class VoiceController {
     this.apply();
   }
 
-  padStart(midi: number, vowel: number): void {
+  /** Pad or camera note. `intensity` defaults to the standard key velocity. */
+  padStart(midi: number, vowel: number, intensity = DEFAULT_VELOCITY): void {
     this.padActive = true;
     this.padMidi = midi;
-    this.setIntensity(DEFAULT_VELOCITY);
+    this.setIntensity(intensity);
     this.setVowel(vowel);
     this.apply();
   }
 
-  padMove(midi: number, vowel: number): void {
+  padMove(midi: number, vowel: number, intensity?: number): void {
     if (!this.padActive) return;
     this.padMidi = midi;
+    if (intensity !== undefined) this.setIntensity(intensity);
     this.setVowel(vowel);
     this.apply();
   }

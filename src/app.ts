@@ -6,10 +6,24 @@ import { Transport, workerTicker, type ScheduleWindow } from './audio/transport'
 import { VoiceController } from './audio/voice-controller';
 import { freqToMidi, midiToFreq, noteName, vowelName } from './music/notes';
 import { createBackdrop } from './ui/backdrop';
+import { CameraView } from './ui/camera-view';
 import { Knob } from './ui/knob';
 import { Monk } from './ui/monk';
 import { Piano } from './ui/piano';
 import { XYPad, type SnapMode } from './ui/xypad';
+import { FaceTracker } from './vision/face-tracker';
+import {
+  CALIBRATION_STEPS,
+  Calibrator,
+  DEFAULT_CALIBRATION,
+  LM,
+  MouthFollower,
+  MouthModel,
+  mouthFeatures,
+  OPEN_OFF,
+  validCalibration,
+  type CalibrationStep,
+} from './vision/mouth';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -44,6 +58,8 @@ interface Prefs {
   countIn: boolean;
   loopBars: number;
   reducedMotion: boolean | null;
+  /** Camera mode: opening the mouth sings (otherwise it only shapes the vowel). */
+  mouthSings: boolean;
 }
 
 const DEFAULTS: Prefs = {
@@ -60,6 +76,7 @@ const DEFAULTS: Prefs = {
   countIn: true,
   loopBars: 4,
   reducedMotion: null,
+  mouthSings: true,
 };
 
 function readJson(key: string): unknown {
@@ -105,6 +122,7 @@ function loadPrefs(): Prefs {
     countIn: bool('countIn', DEFAULTS.countIn) as boolean,
     loopBars: [2, 4, 8].includes(p.loopBars as number) ? (p.loopBars as number) : DEFAULTS.loopBars,
     reducedMotion: bool('reducedMotion', null),
+    mouthSings: bool('mouthSings', DEFAULTS.mouthSings) as boolean,
   };
 }
 
@@ -137,6 +155,15 @@ export function validLoop(value: unknown): MelodyLoop | null {
 }
 
 const VOICE_NAMES = ['Baritone', 'Tenor', 'Alto', 'Soprano'];
+
+const CALIBRATION_PROMPTS: Record<CalibrationStep, [string, string]> = {
+  closed: ['Close your mouth', 'Relaxed, lips together'],
+  OO: ['OO', 'as in “moon”: round, pursed lips'],
+  OH: ['OH', 'as in “go”'],
+  AH: ['AH', 'as in “father”: jaw dropped'],
+  EH: ['EH', 'as in “bed”'],
+  EE: ['EE', 'as in “see”: lips spread wide'],
+};
 
 export function startApp(): void {
   const prefs = loadPrefs();
@@ -659,6 +686,156 @@ export function startApp(): void {
     });
   }
 
+  // ---------------- camera (face) input ----------------
+  // Head left–right = pitch, open mouth = sing, lip shape = vowel.
+  const tracker = new FaceTracker();
+  const cam = new CameraView(pad.el, tracker.video);
+  const follower = new MouthFollower(new MouthModel(validCalibration(readJson('chanter.mouth')) ?? DEFAULT_CALIBRATION));
+  const camOpts = $('cam-opts');
+  const mouthSings = $<HTMLInputElement>('mouth-sings');
+  const calibrateBtn = $<HTMLButtonElement>('btn-calibrate');
+  const LOOKING = 'Looking for your face. Sit facing the camera, in good light.';
+  let cameraOn = false;
+  let camSinging = false;
+  let headNote = NaN;
+  let calibrator: Calibrator | null = null;
+  let calibratedUntil = 0;
+  let lastCamFrame = 0;
+  let camMsg = '';
+
+  mouthSings.checked = prefs.mouthSings;
+  mouthSings.addEventListener('change', () => {
+    prefs.mouthSings = mouthSings.checked;
+    persist();
+  });
+
+  const camMessage = (text: string, action?: { label: string; run: () => void }) => {
+    if (text === camMsg && !action) return;
+    camMsg = text;
+    cam.setMessage(text, action);
+  };
+
+  function camRelease() {
+    if (!camSinging) return;
+    camSinging = false;
+    controller.padEnd();
+  }
+
+  /** Snapped note under the head; holds the current note until the head is clearly past a boundary. */
+  function headMidi(x: number): number {
+    let m = pad.midiAt(x);
+    if (pad.snap !== 'free' && Number.isFinite(headNote) && m !== headNote) {
+      const lo = pad.lowNote;
+      const span = pad.highNote - lo;
+      const raw = lo + Math.min(1, Math.max(0, x)) * span;
+      const back = raw - Math.sign(raw - headNote) * 0.35;
+      if (pad.midiAt((back - lo) / span) === headNote) m = headNote;
+    }
+    return (headNote = m);
+  }
+
+  function setCalibrating(on: boolean) {
+    calibrator = on ? new Calibrator() : null;
+    calibrateBtn.textContent = on ? 'Cancel calibration' : 'Calibrate mouth';
+    calibrateBtn.setAttribute('aria-pressed', String(on));
+    if (on) camRelease();
+    else cam.setPrompt(null);
+  }
+  calibrateBtn.addEventListener('click', () => setCalibrating(!calibrator));
+
+  tracker.onFrame = (face) => {
+    const now = performance.now();
+    const dt = lastCamFrame ? Math.min(0.2, (now - lastCamFrame) / 1000) : 1 / 30;
+    lastCamFrame = now;
+    cam.layout();
+    const features = face && mouthFeatures(face.landmarks, face.blendshapes, face.aspect);
+    const noseX = face ? cam.toPad(face.landmarks[LM.noseTip])[0] : 0.5;
+
+    if (calibrator) {
+      const done = calibrator.update(features, dt);
+      if (done) {
+        follower.model = new MouthModel(done);
+        save('chanter.mouth', done);
+        setCalibrating(false);
+        calibratedUntil = now + 1600;
+      } else {
+        const step = calibrator.current!;
+        const [title, hint] = CALIBRATION_PROMPTS[step];
+        const n = `${CALIBRATION_STEPS.indexOf(step) + 1}/${CALIBRATION_STEPS.length}`;
+        cam.setPrompt({ title, hint: features ? `${hint} · ${n}` : 'Face the camera…', progress: calibrator.progress });
+      }
+      camMessage('');
+      cam.show(face && features ? { landmarks: face.landmarks, noseX, note: '', open: follower.model.openness(features), singing: false } : null);
+      return;
+    }
+    if (calibratedUntil) {
+      if (now < calibratedUntil) cam.setPrompt({ title: 'Calibrated', hint: 'Your mouth shapes are saved.', progress: 1 });
+      else {
+        calibratedUntil = 0;
+        cam.setPrompt(null);
+      }
+    }
+
+    const r = follower.update(features ? { features, x: noseX } : null, dt);
+    // The vowel follows the lips whenever the mouth is open, also for notes played on the keys.
+    if (r.present && r.open >= OPEN_OFF && Math.abs(r.vowel - controller.vowel) > 0.006) controller.setVowel(r.vowel);
+    const midi = headMidi(r.x);
+    if (mouthSings.checked && r.singing) {
+      const intensity = Math.round(r.intensity * 50) / 50;
+      if (!camSinging) {
+        camSinging = true;
+        controller.padStart(midi, controller.vowel, intensity);
+      } else controller.padMove(midi, controller.vowel, intensity);
+    } else camRelease();
+
+    camMessage(r.present ? '' : LOOKING);
+    cam.show(
+      r.present && face
+        ? { landmarks: face.landmarks, noseX: r.x, note: mouthSings.checked ? noteName(midi) : '', open: r.open, singing: camSinging }
+        : null,
+    );
+  };
+
+  const modeRadios = document.querySelectorAll<HTMLInputElement>('input[name=input-mode]');
+  async function startCamera() {
+    camMessage('Starting the camera… The video stays on this computer.');
+    try {
+      await tracker.start();
+      if (cameraOn && tracker.active) camMessage(LOOKING);
+    } catch (err) {
+      if (cameraOn) camMessage((err as Error).message, { label: 'Try again', run: () => void startCamera() });
+    }
+  }
+  function setInputMode(mode: 'pad' | 'camera') {
+    const on = mode === 'camera';
+    for (const r of modeRadios) r.checked = r.value === mode;
+    if (on === cameraOn) return;
+    cameraOn = on;
+    pad.input = !on;
+    cam.visible = on;
+    camOpts.hidden = !on;
+    $('axis-x-title').textContent = on ? 'Pitch · head' : 'Pitch';
+    $('axis-y-title').textContent = on ? 'Vowel · mouth' : 'Vowel';
+    pad.el.setAttribute(
+      'aria-label',
+      on
+        ? 'Camera input. Move your head left or right for pitch, open your mouth to sing, and shape the vowel with your lips.'
+        : 'Pitch and vowel pad. Horizontal is pitch, vertical is vowel. With focus, arrow keys move, hold Space or Enter to sing.',
+    );
+    if (on) {
+      follower.reset();
+      lastCamFrame = 0;
+      headNote = NaN;
+      void startCamera();
+    } else {
+      tracker.stop();
+      setCalibrating(false);
+      camRelease();
+      camMessage('');
+    }
+  }
+  for (const r of modeRadios) r.addEventListener('change', () => r.checked && setInputMode(r.value as 'pad' | 'camera'));
+
   // ---------------- piano & octave ----------------
   const piano = new Piano({
     onDown: (m, velocity) => controller.pressKey(m, velocity),
@@ -733,7 +910,8 @@ export function startApp(): void {
         void toggleRecord();
         break;
       case 'Escape':
-        stopAll();
+        if (calibrator) setCalibrating(false);
+        else stopAll();
         break;
       case 'Slash':
         if (!e.shiftKey) return;
@@ -883,6 +1061,14 @@ export function startApp(): void {
       recorder,
       monk,
       pad,
+      camera: {
+        tracker,
+        follower,
+        setInputMode,
+        get calibrating() {
+          return calibrator?.current ?? null;
+        },
+      },
       get loop() {
         return loop;
       },

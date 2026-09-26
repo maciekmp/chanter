@@ -1,6 +1,6 @@
 # Chanter — singing-monk vocal synthesizer
 
-A playable, desktop-first web instrument. You play a melody with the XY pad, the on-screen piano or your computer keyboard. A monophonic formant voice sings it, and an illustrated monk sings along. The monk is driven by the synth's actual state.
+A playable, desktop-first web instrument. You play a melody with the XY pad, your face on a webcam, the on-screen piano or your computer keyboard. A monophonic formant voice sings it, and an illustrated monk sings along. The monk is driven by the synth's actual state.
 
 ## Run
 
@@ -14,7 +14,8 @@ Audio starts on your first click or key press, as browsers require. Press `H` to
 ```bash
 npm test             # DSP, transport and recorder unit tests (Vitest)
 npm run build        # type-check + production build to dist/
-npm run verify:browser   # end-to-end checks in headless Chromium (needs `npm run dev` running)
+npm run verify:browser   # end-to-end checks in headless Chromium (needs `npm run dev` running;
+                         # the camera checks use a fake webcam and download the face tracker)
 ```
 
 Other dev scripts (they also need the dev server): `node scripts/poses.mjs <dir>` captures the monk's mouth shapes; `node scripts/levels.mjs` measures voice and track loudness; `node scripts/shot.mjs <url> <out.png> <w> <h>` takes a screenshot.
@@ -27,11 +28,24 @@ Other dev scripts (they also need the dev server): `node scripts/poses.mjs <dir>
 | Octave | `Z` / `X`, or the Oct buttons |
 | Vowel | `1`–`5` (OO … EE), hold `↑`/`↓` to sweep, the vowel strip, or drag up/down on a held piano key |
 | Pitch + vowel | Press and drag the XY pad (X = pitch, Y = vowel). While a key is held, the pad changes only the vowel |
+| Camera | Switch *Pad → Camera* above the pad. Open your mouth to sing, move your head left/right for pitch, shape OO … EE with your lips. See [Camera input](#camera-input) |
 | Backing track | Click a track; `Space` play/pause, `Esc` stop |
 | Record loop | `R` or ●: records 2/4/8 bars in time with the track (after the count-in if stopped, or from the next bar), then replays every cycle. Playing live takes over from the replay |
 | Help | `?` |
 
-The pad can snap to *white keys* (the default), *semitones*, or be *free* (continuous). Every backing track uses a white-key mode (A minor, D dorian, E phrygian, C major), so the white keys always fit.
+The pad (and the head position in camera mode) can snap to *white keys* (the default), *semitones*, or be *free* (continuous). Every backing track uses a white-key mode (A minor, D dorian, E phrygian, C major), so the white keys always fit.
+
+### Camera input
+
+The *Camera* switch replaces the XY pad with your mirrored webcam picture. Face tracking runs in the browser (MediaPipe Face Landmarker), and the video never leaves your computer.
+
+- **Pitch:** where your nose sits over the pad's note grid. The marker at the top names the note.
+- **Sing:** open your mouth. The meter on the right shows how open it is: singing starts above the upper tick and stops below the lower one. Opening wider than your calibrated shape sings louder.
+- **Vowel:** lip shape, from rounded (OO) through open (AH) to spread (EE). While a piano or computer key is held, the key sets the pitch and your mouth shapes its vowel.
+- **Open mouth to sing** (on by default): switch it off to use the camera only for the vowel of notes you play on the keys.
+- **Calibrate mouth:** hold a closed mouth, then OO, OH, AH, EH and EE for about 1.7 s each. The shapes are saved in the browser. Before you calibrate, typical adult shapes are used; calibration makes vowels noticeably more accurate. `Esc` cancels.
+
+The tracker (about 3.7 MB model plus 11 MB wasm) loads the first time you switch to Camera. The model comes from Google's MediaPipe storage, so that first switch needs a connection. Camera access needs HTTPS or localhost.
 
 ## How it works
 
@@ -47,6 +61,7 @@ The pad can snap to *white keys* (the default), *semitones*, or be *free* (conti
   - Beat↔time is piecewise linear. Tempo changes re-anchor at the scheduling horizon, so audio stays continuous.
   - Backing tracks (`tracks.ts`, synthesized by `instruments.ts`) are scheduled at exact AudioContext times.
   - The echo is a ping-pong dotted-eighth delay synced to the tempo.
+- **Camera** (`src/vision/`): `face-tracker.ts` runs the face landmarker on each new video frame. `mouth.ts` turns landmarks and blendshapes into scale-free mouth features: width, lip gap, rounding, spreading. The vowel is the nearest point on the polyline through the five calibrated vowel shapes, with features weighted by how much they vary across the vowels. Openness is the lip gap between the closed and least-open calibrated shapes, and the gate has hysteresis. The camera drives the voice through the same path as the XY pad, so recording and replay work unchanged.
 - **Recording** (`recorder.ts`): stores gate, pitch, vowel, intensity, glide and voice events against the beat grid, timestamped at the *heard* beat (latency-compensated). Replay schedules them as AudioParam automation, so a loop stays in time at any tempo. Melodies can be saved and loaded as JSON; *Export audio* captures one loop cycle in real time to WebM/Opus.
 
 ## Known limitations
@@ -56,4 +71,5 @@ The pad can snap to *white keys* (the default), *semitones*, or be *free* (conti
 - The first note after page load waits for the AudioContext and worklet to start (usually a fraction of a second).
 - Replaying a loop and playing live share the one monophonic voice; live input temporarily takes over.
 - If playback resumes in the middle of a replayed note, that note stays silent until the next recorded note onset.
+- Camera vowels depend on lighting, head angle and your own mouth shapes; calibrate for the best results. Head pitch uses the horizontal position only, so turning your head (rather than moving it) also shifts the note slightly.
 - Desktop-first. Below 860 px wide the layout stacks vertically, which works but is not the primary target.

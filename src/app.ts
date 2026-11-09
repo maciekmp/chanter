@@ -138,13 +138,15 @@ export function validLoop(value: unknown): MelodyLoop | null {
     (e) =>
       e &&
       typeof e === 'object' &&
-      e.type in PARAM_FOR &&
+      typeof e.type === 'string' &&
+      Object.hasOwn(PARAM_FOR, e.type) &&
       Number.isFinite(e.beat) &&
       e.beat >= 0 &&
       e.beat < lengthBeats &&
       Number.isFinite(e.value) &&
       (e.type !== 'pitch' || (e.value >= 12 && e.value <= 108)) &&
-      (e.type === 'pitch' || (e.value >= 0 && e.value <= 2)),
+      (e.type === 'pitch' || (e.value >= 0 && e.value <= (e.type === 'glide' ? 2 : 1))) &&
+      (e.type !== 'gate' || e.value === 0 || e.value === 1),
   );
   if (!ok) return null;
   return {

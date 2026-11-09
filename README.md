@@ -2,14 +2,28 @@
 
 A playable, desktop-first web instrument. You play a melody with the XY pad, your face on a webcam, the on-screen piano or your computer keyboard. A monophonic formant voice sings it, and an illustrated monk sings along. The monk is driven by the synth's actual state.
 
+[Play the live demo](https://chanter-two.vercel.app/) · [CI checks](https://github.com/maciekmp/chanter/actions/workflows/ci.yml)
+
+![Chanter interface: singing monk, backing tracks, pitch and vowel controls, and piano keyboard](preview.jpg)
+
+## Try it in a minute
+
+1. Open the demo in a desktop browser and click **Wake the voice**.
+2. Hold `H` to sing A3; press `1`–`5` to change the vowel.
+3. Choose a backing track and use `R` to record a melody loop.
+
+Camera input is optional. The pad and keyboard work without granting camera access.
+
 ## Run
 
 ```bash
-npm install
+npm ci
 npm run dev          # http://localhost:5173
 ```
 
 Audio starts on your first click or key press, as browsers require. Press `H` to sing A3 straight away, or click a backing track.
+
+Use Node.js 24 and npm (the CI environment). Dependencies are pinned by `package-lock.json`.
 
 ```bash
 npm test             # DSP, transport and recorder unit tests (Vitest)
@@ -19,6 +33,8 @@ npm run verify:browser   # end-to-end checks in headless Chromium (needs `npm ru
 ```
 
 Other dev scripts (they also need the dev server): `node scripts/poses.mjs <dir>` captures the monk's mouth shapes; `node scripts/levels.mjs` measures voice and track loudness; `node scripts/shot.mjs <url> <out.png> <w> <h>` takes a screenshot.
+
+Before the first browser check, install Chromium with `npx playwright install chromium`. On Linux CI, use `npx playwright install --with-deps chromium`. The camera portion additionally needs access to the external MediaPipe model. `npm test` and `npm run build` run on pushes to `main` and on pull requests. The level-calibration helper is intentionally skipped unless `MEASURE=1` is set; it prints measurements rather than asserting behavior.
 
 ## Playing
 

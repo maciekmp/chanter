@@ -4,6 +4,8 @@ A playable, desktop-first web instrument. You play a melody with the XY pad, you
 
 [Play the live demo](https://chanter-two.vercel.app/) · [CI checks](https://github.com/maciekmp/chanter/actions/workflows/ci.yml)
 
+![Chanter interface: singing monk, backing tracks, pitch and vowel controls, and piano keyboard](preview.jpg)
+
 ## Try it in a minute
 
 1. Open the demo in a desktop browser and click **Wake the voice**.
